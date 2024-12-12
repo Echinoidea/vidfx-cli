@@ -8,3 +8,5 @@ clap = { version = "4.5.23", features = ["derive"] }
 ffmpeg-next = "7.1.0"
 image = "0.25.5"
 imgfx = { path = "/home/gabriel/code/rust/imgfx-crate/"}
+ndarray = "0.16.1"
+video-rs = { version = "0.10", features = ["ndarray"] }
