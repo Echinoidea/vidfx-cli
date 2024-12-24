@@ -1,5 +1,7 @@
 use clap::{builder::styling::RgbColor, ArgAction, Parser, Subcommand};
 use image::*;
+use std::arch::x86_64::_mm_div_pd;
+use std::ops::Add;
 use std::path::Path;
 
 use ndarray::{self, Array, Array3};
@@ -38,6 +40,9 @@ enum SubCommands {
     Mult {
         color: String,
     },
+    Pow {
+        color: String,
+    },
     Div {
         color: String,
     },
@@ -56,12 +61,18 @@ enum SubCommands {
         min_threshold: u8,
         max_threshold: Option<u8>,
     },
+    Sort {
+        direction: imgfx::sort::Direction,
+        sort_by: imgfx::sort::SortBy,
+        min_threshold: f32,
+        max_threshold: f32,
+    },
 }
 
 #[derive(Parser)]
-#[command(name = "img-mod")]
-#[command(version = "0.2.0")]
-#[command(about = "Arithmetic, logical, bitwise, filtering, and higher level operations for images.", long_about = None)]
+#[command(name = "vidfx")]
+#[command(version = "0.0.2")]
+#[command(about = "Implementation of imgfx for videos", long_about = None)]
 struct Args {
     #[command(subcommand)]
     cmd: SubCommands,
@@ -74,11 +85,11 @@ struct Args {
     #[arg(long, default_value = ".")]
     output: Option<String>,
 
-    #[arg(short, long, default_value = "default", global = true)]
+    #[arg(short, long, default_value = "default")]
     visualization: String,
 
     #[arg(short, long)]
-    bpm: Option<u8>,
+    bpm: Option<u32>,
 
     /// Specify the left hand side operands for the function. E.g. --lhs b g r
     #[arg(long, num_args(1..), global = true)]
@@ -115,7 +126,7 @@ fn bpm_scale_factor(bpm: u32, wave_type: &WaveType, current_time: f64) -> f64 {
 
     match wave_type {
         WaveType::Sine => (beat_progress * std::f64::consts::PI * 2.0).sin() * 0.5 + 0.5,
-        WaveType::Saw => beat_progress,
+        WaveType::Saw => (1f64 - beat_progress) as f64,
         WaveType::Square => {
             if beat_progress < 0.5 {
                 1.0
@@ -256,6 +267,15 @@ fn process_subcommand(
                 scaled_color(rgb, scale_factor),
             )
         }
+        SubCommands::Pow { color } => {
+            let rgb = hex_to_rgb(color).expect("Could not convert color to rgb");
+            pow(
+                img,
+                lhs.clone(),
+                rhs.clone(),
+                scaled_color(rgb, scale_factor),
+            )
+        }
         SubCommands::Div { color } => {
             let rgb = hex_to_rgb(color).expect("Could not convert color to rgb");
             div(
@@ -308,6 +328,19 @@ fn process_subcommand(
             min_threshold,
             max_threshold,
         } => imgfx::bloom(img, *intensity, *radius, *min_threshold, *max_threshold),
+
+        SubCommands::Sort {
+            direction,
+            sort_by,
+            min_threshold,
+            max_threshold,
+        } => sort(
+            Into::into(img),
+            *direction,
+            *sort_by,
+            *min_threshold * scale_factor as f32,
+            *max_threshold * scale_factor as f32,
+        ),
     }
 }
 
@@ -335,7 +368,7 @@ fn main() {
             wave_type: WaveType::Sine,
         },
         "saw" => VisualizationMode::Osc {
-            bpm: 180,
+            bpm: bpm.unwrap_or(0) as u32,
             wave_type: WaveType::Saw,
         },
         "square" => VisualizationMode::Osc {
@@ -374,7 +407,9 @@ fn main() {
 
     let mut position = Time::zero();
 
-    let duration: Time = Time::from_nth_of_a_second(max_duration as usize);
+    //let duration: Time = Time::from_nth_of_a_second(max_duration as usize);
+    let frame_interval = (1.0 / frame_rate) as f64; // Time per frame in seconds (fractional)
+    let frame_duration = Time::from_secs_f64(frame_interval); // Frame duration as Time
 
     for frame in processed {
         let rgb_image = rgba_to_rgb(&frame);
@@ -383,7 +418,8 @@ fn main() {
             .encode(&image_to_ndarray(&rgb_image), position)
             .expect("Failed to encode frame");
 
-        position = position.aligned_with(duration).add();
+        // Increment position by frame duration
+        position = Time::from_secs_f64(position.as_secs_f64() + frame_interval);
     }
 }
 
