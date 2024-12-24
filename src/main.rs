@@ -1,7 +1,5 @@
 use clap::{builder::styling::RgbColor, ArgAction, Parser, Subcommand};
 use image::*;
-use std::arch::x86_64::_mm_div_pd;
-use std::ops::Add;
 use std::path::Path;
 
 use ndarray::{self, Array, Array3};
@@ -142,7 +140,6 @@ fn process_video<F>(
     decoder: &mut Decoder,
     frame_processor: F,
     frame_rate: f64,
-    max_duration: f64,
     frame_width: u32,
     frame_height: u32,
     visualization_mode: VisualizationMode,
@@ -151,15 +148,10 @@ where
     F: Fn(DynamicImage, f64) -> DynamicImage,
 {
     let mut processed = vec![];
-    let mut elapsed_time = 0.0;
     let mut current_time = 0.0;
 
     for frame in decoder.decode_iter() {
         if let Ok((_, frame)) = frame {
-            if elapsed_time > max_duration {
-                break;
-            }
-
             let scale_factor = match &visualization_mode {
                 VisualizationMode::Default => 1.0,
                 VisualizationMode::Osc { bpm, wave_type } => {
@@ -181,7 +173,6 @@ where
 
             processed.push(output);
 
-            elapsed_time += 1.0 / frame_rate;
             current_time = current_time + 1.0 / frame_rate as f64;
         } else {
             break;
@@ -357,26 +348,25 @@ fn main() {
 
     let (width, height) = decoder.size();
     let frame_rate = decoder.frame_rate();
-    let max_duration = 20.0;
 
     let bpm = args.bpm;
 
     let visualization_mode = match args.visualization.as_str() {
         "default" => VisualizationMode::Default,
         "sine" => VisualizationMode::Osc {
-            bpm: bpm.unwrap_or(0) as u32,
+            bpm: bpm.expect("No --bpm provided!"),
             wave_type: WaveType::Sine,
         },
         "saw" => VisualizationMode::Osc {
-            bpm: bpm.unwrap_or(0) as u32,
+            bpm: bpm.expect("No --bpm provided!"),
             wave_type: WaveType::Saw,
         },
         "square" => VisualizationMode::Osc {
-            bpm: bpm.unwrap_or(0) as u32,
+            bpm: bpm.expect("No --bpm provided!"),
             wave_type: WaveType::Square,
         },
         "triangle" => VisualizationMode::Osc {
-            bpm: bpm.unwrap_or(0) as u32,
+            bpm: bpm.expect("No --bpm provided!"),
             wave_type: WaveType::Triangle,
         },
         _ => panic!("Unknown visualization mode"),
@@ -395,7 +385,6 @@ fn main() {
             ))
         },
         frame_rate as f64,
-        max_duration,
         width,
         height,
         visualization_mode,
@@ -407,9 +396,7 @@ fn main() {
 
     let mut position = Time::zero();
 
-    //let duration: Time = Time::from_nth_of_a_second(max_duration as usize);
-    let frame_interval = (1.0 / frame_rate) as f64; // Time per frame in seconds (fractional)
-    let frame_duration = Time::from_secs_f64(frame_interval); // Frame duration as Time
+    let frame_interval = (1.0 / frame_rate) as f64;
 
     for frame in processed {
         let rgb_image = rgba_to_rgb(&frame);
@@ -418,7 +405,6 @@ fn main() {
             .encode(&image_to_ndarray(&rgb_image), position)
             .expect("Failed to encode frame");
 
-        // Increment position by frame duration
         position = Time::from_secs_f64(position.as_secs_f64() + frame_interval);
     }
 }
